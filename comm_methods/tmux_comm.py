@@ -264,50 +264,44 @@ class TmuxCommunicator:
             for tmux_cmd in cmds:
                 subprocess.check_output(tmux_cmd, text=True, timeout=3)
 
-            max_attempts = 3 if might_block else 1
-            got_response = False
-            content = ""
-
             capture_cmd = ["tmux", "capture-pane", "-p", "-t", target, "-S", "-", "-E", "-"]
 
-            for attempt in range(max_attempts):
-                time.sleep(1)
-                pane_text = subprocess.check_output(capture_cmd, text=True, timeout=3).strip()
-
-                if output_marker not in pane_text:
-                    test_cmd = ["tmux", "send-keys", "-t", target, f"echo GDB_TEST_{attempt}", "Enter"]
-                    subprocess.check_output(test_cmd, text=True, timeout=3)
-                    time.sleep(0.2)
+            # Wait for gdb prompt to return (handles long-output commands like
+            # "info proc mappings" that take more than 1 second to complete).
+            # We poll the pane until the (gdb) prompt reappears, up to 15 seconds.
+            prompt_returned = False
+            pane_text = ""
+            prompt_deadline = time.time() + 15
+            while time.time() < prompt_deadline:
+                time.sleep(0.4)
+                try:
                     pane_text = subprocess.check_output(capture_cmd, text=True, timeout=3).strip()
+                except Exception:
+                    continue
+                lines = [ln for ln in pane_text.splitlines() if ln.strip()]
+                if lines and re.search(r"\(gdb\)\s*$", lines[-1]):
+                    prompt_returned = True
+                    break
 
-                if output_marker in pane_text:
-                    if end_marker not in pane_text:
-                        end_cmd = ["tmux", "send-keys", "-t", target, f"echo {end_marker}", "Enter"]
-                        subprocess.check_output(end_cmd, text=True, timeout=3)
-                        time.sleep(0.2)
-                        pane_text = subprocess.check_output(capture_cmd, text=True, timeout=3).strip()
+            if not prompt_returned:
+                # GDB prompt never returned — command may be blocking (e.g. continue/run)
+                if might_block:
+                    interrupt_cmds = [
+                        ["tmux", "send-keys", "-t", target, "C-c"],
+                        ["tmux", "send-keys", "-t", target, "echo <<<GDB_INTERRUPTED>>>", "Enter"],
+                    ]
+                    for cmd in interrupt_cmds:
+                        subprocess.check_output(cmd, text=True, timeout=3)
+                    self.is_blocked = True
+                    self.last_command_time = time.time()
+                    return True, "命令执行阻塞，已发送中断信号。"
+                return False, "命令执行超时(15s)，gdb提示符未返回。"
 
-                    if end_marker in pane_text:
-                        content = pane_text
-                        got_response = True
-                        break
-
-                logger.warning("检测到可能的阻塞 (%s/%s)", attempt + 1, max_attempts)
-                content = pane_text
-
-            if not got_response and might_block:
-                interrupt_cmds = [
-                    ["tmux", "send-keys", "-t", target, "C-c"],
-                    ["tmux", "send-keys", "-t", target, "echo <<<GDB_INTERRUPTED>>>", "Enter"],
-                ]
-                for cmd in interrupt_cmds:
-                    subprocess.check_output(cmd, text=True, timeout=3)
-                self.is_blocked = True
-                self.last_command_time = time.time()
-                return True, "命令执行阻塞，已发送中断信号。"
-
-            if not got_response:
-                return False, "执行命令时未获得终端响应，可能出现异常。"
+            # Prompt is back — send end marker and capture final pane
+            end_cmd = ["tmux", "send-keys", "-t", target, f"echo {end_marker}", "Enter"]
+            subprocess.check_output(end_cmd, text=True, timeout=3)
+            time.sleep(0.3)
+            content = subprocess.check_output(capture_cmd, text=True, timeout=3).strip()
 
             self.is_blocked = False
 
