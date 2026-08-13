@@ -242,8 +242,47 @@ class TmuxCommunicator:
         if self.tmux_session_name:
             return True
         if self.find_gdb_window():
+            self._init_session()
             return True
-        return False
+        # Auto-create: no existing gdb session found, start one
+        return self._create_session()
+
+    DEFAULT_SESSION = "navidatagdb"
+
+    def _create_session(self):
+        """Create a detached tmux session with gdb -q, then init it."""
+        try:
+            subprocess.check_output(
+                ["tmux", "new-session", "-d", "-s", self.DEFAULT_SESSION, "gdb", "-q"],
+                text=True, timeout=5,
+            )
+            logger.info(f"自动创建tmux会话 {self.DEFAULT_SESSION}")
+            self.tmux_session_name = self.DEFAULT_SESSION
+            time.sleep(0.5)  # let gdb start up
+            self._init_session()
+            return True
+        except subprocess.CalledProcessError:
+            # Session may already exist under a different name; try attaching anyway
+            logger.warning("自动创建tmux会话失败，尝试查找已有会话")
+            if self.find_gdb_window():
+                self._init_session()
+                return True
+            return False
+
+    def _init_session(self):
+        """Send initialization commands to a newly found/created gdb session."""
+        if not self.tmux_session_name:
+            return
+        try:
+            # Disable pagination so long output never blocks on --Type <RET> for more--
+            subprocess.check_output(
+                ["tmux", "send-keys", "-t", self.tmux_session_name, "set pagination off", "Enter"],
+                text=True, timeout=3,
+            )
+            time.sleep(0.3)
+            logger.info("已发送 set pagination off")
+        except Exception as exc:
+            logger.warning(f"初始化gdb会话失败: {exc}")
 
     def execute_command(self, command) -> Tuple[bool, str]:
         """使用tmux方式执行GDB命令"""
@@ -311,7 +350,19 @@ class TmuxCommunicator:
                 cleaned = output_value.replace(command, "", 1).strip()
                 return True, cleaned
 
-            return True, ""
+            # Markers not found — output was too long and scrolled out of tmux buffer
+            # Return what we have from the pane (after command echo) with a hint
+            hint = (f"⚠ 输出文本过长，起始标记已滚出tmux缓冲区导致截断。"
+                    f"建议使用 pipe 命令筛选，例如: pipe {command} | grep <关键词>")
+            # Try to salvage whatever is between the command and end_marker
+            partial = content
+            if end_marker in partial:
+                partial = partial.split(end_marker, 1)[0]
+            # Strip the command echo line itself if present
+            partial_lines = [l for l in partial.splitlines() if l.strip()]
+            if partial_lines:
+                return True, hint + "\n---\n" + "\n".join(partial_lines)
+            return True, hint
 
         except Exception as exc:
             logger.error(f"执行命令失败: {exc}")
