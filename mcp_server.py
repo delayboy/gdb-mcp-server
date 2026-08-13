@@ -102,6 +102,12 @@ def gdb_try_interrupt(timeout: int = 10) -> Dict:
     """主动发Ctrl-C叫停正在运行的程序(已停下则空操作)，并如实返回 was_blocked(调用前是否在跑) 与现场。叫停/探测是否在跑用这个。"""
     return gdb_tools.gdb_try_interrupt(timeout)
 
+
+@mcp.tool(name="gdb_run_async")
+def gdb_run_async(command: str = "continue") -> Dict:
+    """发出continue让程序自由运行并立即返回(不轮询/不中断)。长跑场景用这个发车，再用gdb_wait_stop观察或gdb_try_interrupt叫停。"""
+    return gdb_tools.gdb_run_async(command)
+
 if __name__ == "__main__":
     logger.info("启动GDB MCP服务器")
     try:

@@ -207,6 +207,37 @@ class TmuxCommunicator:
         return {"success": True, "was_blocked": was_blocked, "stopped": stopped,
                 "scene": self._stop_scene(pane), "elapsed": round(time.time() - start, 1)}
 
+    def run_async(self, command="continue"):
+        """发出命令(默认 continue)并立即返回，不轮询、不发 Ctrl-C。让程序自由运行。
+
+        若程序已在运行(未在提示符)，则不重复发送，避免命令堆积到缓冲区。
+        返回 dict: success, running(发送后是否预期在跑), scene, command。
+        """
+        if not self._require_session():
+            return {"success": False, "running": False,
+                    "scene": "未找到GDB的tmux会话，请先启动或附加", "command": command}
+        target = self.tmux_session_name
+        try:
+            pane = self._capture_pane(target)
+        except Exception as exc:
+            return {"success": False, "running": False,
+                    "scene": f"读取pane失败: {exc}", "command": command}
+        if not self._at_prompt(pane):
+            return {"success": False, "running": True,
+                    "scene": "程序已在运行，未重复发送(避免命令堆积)。如需重启先 gdb_try_interrupt 叫停。",
+                    "command": command}
+        try:
+            subprocess.check_output(["tmux", "send-keys", "-t", target, command, "Enter"],
+                                    text=True, timeout=3)
+        except Exception as exc:
+            return {"success": False, "running": False,
+                    "scene": f"发送失败: {exc}", "command": command}
+        self.is_blocked = True
+        self.last_command_time = time.time()
+        return {"success": True, "running": True,
+                "scene": f"已发送 '{command}'，程序开始运行。用 gdb_wait_stop 观察/捕获停止，用 gdb_try_interrupt 叫停。",
+                "command": command}
+
     def _require_session(self):
         if self.tmux_session_name:
             return True

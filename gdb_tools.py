@@ -392,4 +392,27 @@ def gdb_try_interrupt(timeout=10) -> Dict[str, Any]:
     except Exception as e:
         logger.error(f"try_interrupt出错: {str(e)}")
         return {"success": False, "was_blocked": False, "stopped": False, "elapsed": 0.0,
-                "scene": f"出错: {str(e)}", "formatted_result": f"try_interrupt出错: {str(e)}"} 
+                "scene": f"出错: {str(e)}", "formatted_result": f"try_interrupt出错: {str(e)}"}
+
+
+def gdb_run_async(command="continue") -> Dict[str, Any]:
+    """发出continue让程序自由运行并立即返回(不轮询、不发Ctrl-C、不强制中断)。
+
+    用于启动一段需要连续运行超过3秒的调试(等用户GUI操作/慢速网络超时/时序敏感的崩溃)。
+    若程序已在运行则不重复发送(避免命令堆积)。发出后用 gdb_wait_stop 观察停止/捕获崩溃，
+    或用 gdb_try_interrupt 叫停。
+    """
+    try:
+        comm = init_communicator()
+        r = comm.run_async(command)
+        return {
+            "success": r.get("success", False),
+            "running": r.get("running", False),
+            "command": r.get("command", command),
+            "scene": r.get("scene", ""),
+            "formatted_result": r.get("scene", ""),
+        }
+    except Exception as e:
+        logger.error(f"run_async出错: {str(e)}")
+        return {"success": False, "running": False, "command": command,
+                "scene": f"出错: {str(e)}", "formatted_result": f"run_async出错: {str(e)}"} 

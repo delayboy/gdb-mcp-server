@@ -222,6 +222,16 @@ class GdbCommunicator:
         return {"success": False, "was_blocked": False, "stopped": False,
                 "scene": "当前通信方法不支持 try_interrupt", "elapsed": 0.0}
 
+    def run_async(self, command="continue") -> Dict[str, Any]:
+        """发出 continue 让程序自由运行，立即返回（不轮询、不中断）。"""
+        if not self.connected:
+            return {"success": False, "running": False, "scene": "未连接到GDB进程", "command": command}
+        if self.tmux_comm and self.preferred_method == "tmux":
+            return self.tmux_comm.run_async(command)
+        if hasattr(self.pexpect_comm, "run_async"):
+            return self.pexpect_comm.run_async(command)
+        return {"success": False, "running": False, "scene": "当前通信方法不支持 run_async", "command": command}
+
     def get_communication_status(self) -> Dict[str, Any]:
         """获取当前通信状态的信息"""
         status = {
