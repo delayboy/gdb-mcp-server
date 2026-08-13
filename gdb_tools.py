@@ -2,6 +2,7 @@
 """GDB MCP工具函数"""
 
 import logging
+import re
 import traceback
 from typing import Dict, Any
 from comm_methods.gdb_communicator import GdbCommunicator
@@ -124,8 +125,12 @@ def gdb_set_breakpoint(location, gdb_pid=None) -> Dict[str, Any]:
     """设置断点"""
     if gdb_pid is not None:
         gdb_pid = str(gdb_pid)
-        
+
     comm = init_communicator()
+    # Hex addresses must use * prefix: break *0x7ffff... not break 0x7ffff...
+    # GDB treats bare hex as a function name lookup and prompts for pending breakpoint.
+    if re.match(r'^0[xX][0-9a-fA-F]+$', location.strip()):
+        location = f"*{location.strip()}"
     success, output = comm.execute_command(f"break {location}", gdb_pid)
     
     command_sent_but_no_output = ("通过键盘事件发送" in output or "请在GDB终端中" in output)

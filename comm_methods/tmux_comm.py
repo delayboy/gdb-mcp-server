@@ -275,12 +275,15 @@ class TmuxCommunicator:
             return
         try:
             # Disable pagination so long output never blocks on --Type <RET> for more--
-            subprocess.check_output(
-                ["tmux", "send-keys", "-t", self.tmux_session_name, "set pagination off", "Enter"],
-                text=True, timeout=3,
-            )
-            time.sleep(0.3)
-            logger.info("已发送 set pagination off")
+            # Disable confirmation so delete/break never prompt for (y or n)
+            init_cmds = ["set pagination off", "set confirm off"]
+            for cmd in init_cmds:
+                subprocess.check_output(
+                    ["tmux", "send-keys", "-t", self.tmux_session_name, cmd, "Enter"],
+                    text=True, timeout=3,
+                )
+                time.sleep(0.3)
+            logger.info(f"已发送初始化命令: {', '.join(init_cmds)}")
         except Exception as exc:
             logger.warning(f"初始化gdb会话失败: {exc}")
 
