@@ -197,7 +197,31 @@ class GdbCommunicator:
             "running_time": 0,
             "status": "当前通信方法不支持阻塞检测"
         }
-    
+
+    def wait_stop(self, timeout=30) -> Dict[str, Any]:
+        """被动等待程序自行停下（崩溃/断点/信号），不发 Ctrl-C。"""
+        if not self.connected:
+            return {"success": False, "was_blocked": False, "stopped": False,
+                    "scene": "未连接到GDB进程", "elapsed": 0.0}
+        if self.tmux_comm and self.preferred_method == "tmux":
+            return self.tmux_comm.wait_stop(timeout)
+        if hasattr(self.pexpect_comm, "wait_stop"):
+            return self.pexpect_comm.wait_stop(timeout)
+        return {"success": False, "was_blocked": False, "stopped": False,
+                "scene": "当前通信方法不支持 wait_stop", "elapsed": 0.0}
+
+    def try_interrupt(self, timeout=10) -> Dict[str, Any]:
+        """主动发 Ctrl-C 叫停程序，并报告调用前是否在跑。"""
+        if not self.connected:
+            return {"success": False, "was_blocked": False, "stopped": False,
+                    "scene": "未连接到GDB进程", "elapsed": 0.0}
+        if self.tmux_comm and self.preferred_method == "tmux":
+            return self.tmux_comm.try_interrupt(timeout)
+        if hasattr(self.pexpect_comm, "try_interrupt"):
+            return self.pexpect_comm.try_interrupt(timeout)
+        return {"success": False, "was_blocked": False, "stopped": False,
+                "scene": "当前通信方法不支持 try_interrupt", "elapsed": 0.0}
+
     def get_communication_status(self) -> Dict[str, Any]:
         """获取当前通信状态的信息"""
         status = {

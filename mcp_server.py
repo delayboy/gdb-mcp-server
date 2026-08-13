@@ -56,10 +56,10 @@ def gdb_finish(gdb_pid=None) -> Dict:
     """运行至函数返回"""
     return gdb_tools.gdb_finish(gdb_pid)
 
-@mcp.tool(name="gdb_continue")
-def gdb_continue(gdb_pid=None) -> Dict:
-    """继续执行"""
-    return gdb_tools.gdb_continue(gdb_pid)
+@mcp.tool(name="gdb_continue_bounded_3s")
+def gdb_continue_bounded_3s(gdb_pid=None) -> Dict:
+    """继续执行(continue)，带3秒安全网：3秒内未自行停下则自动Ctrl-C强制中断。适合短期采样/监控；长跑场景用gdb_wait_stop。"""
+    return gdb_tools.gdb_continue_bounded_3s(gdb_pid)
 
 @mcp.tool(name="gdb_get_registers")
 def gdb_get_registers(gdb_pid=None) -> Dict:
@@ -91,10 +91,16 @@ def gdb_connect_remote(target_address, gdb_pid=None) -> Dict:
     """连接到远程调试目标"""
     return gdb_tools.gdb_connect_remote(target_address, gdb_pid)
 
-@mcp.tool(name="gdb/check_blocked")
-def check_gdb_blocked():
-    """检查GDB是否处于阻塞状态（正在运行）"""
-    return gdb_tools.check_gdb_blocked()
+@mcp.tool(name="gdb_wait_stop")
+def gdb_wait_stop(timeout: int = 30) -> Dict:
+    """被动等待程序自行停下(崩溃SIGSEGV/断点/信号)，不发Ctrl-C，不扰动时序；返回pane尾部现场。捕获崩溃用这个。"""
+    return gdb_tools.gdb_wait_stop(timeout)
+
+
+@mcp.tool(name="gdb_try_interrupt")
+def gdb_try_interrupt(timeout: int = 10) -> Dict:
+    """主动发Ctrl-C叫停正在运行的程序(已停下则空操作)，并如实返回 was_blocked(调用前是否在跑) 与现场。叫停/探测是否在跑用这个。"""
+    return gdb_tools.gdb_try_interrupt(timeout)
 
 if __name__ == "__main__":
     logger.info("启动GDB MCP服务器")

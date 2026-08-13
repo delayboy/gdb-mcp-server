@@ -205,20 +205,24 @@ def gdb_finish(gdb_pid=None) -> Dict[str, Any]:
         "has_output": not command_sent_but_no_output
     }
 
-def gdb_continue(gdb_pid=None) -> Dict[str, Any]:
-    """继续执行"""
+def gdb_continue_bounded_3s(gdb_pid=None) -> Dict[str, Any]:
+    """继续执行(continue)，带3秒安全网：若程序3秒内未自行停下则自动发Ctrl-C强制中断。
+
+    适合短期状态采样/监控；不要用于需要程序连续运行超过3秒的场景（等用户操作/慢超时/
+    时序敏感崩溃），那种场景请用 gdb_wait_stop，或直接 tmux send-keys continue。
+    """
     if gdb_pid is not None:
         gdb_pid = str(gdb_pid)
-        
+
     comm = init_communicator()
     success, output = comm.execute_command("continue", gdb_pid)
     command_sent_but_no_output = ("通过键盘事件发送" in output or "请在GDB终端中" in output)
     blocked = "阻塞" in output and "中断" in output
-    
+
     return {
-        "success": success, 
-        "output": output, 
-        "formatted_result": f"继续执行: {output}" if success else f"继续执行失败: {output}",
+        "success": success,
+        "output": output,
+        "formatted_result": f"continue(3秒兜底): {output}" if success else f"continue失败: {output}",
         "has_output": not command_sent_but_no_output,
         "blocked": blocked
     }
@@ -332,20 +336,60 @@ def gdb_connect_remote(target_address, gdb_pid=None) -> Dict[str, Any]:
         "blocked": blocked
     }
 
-def check_gdb_blocked() -> Dict:
-    """检查GDB是否处于阻塞状态"""
+def gdb_wait_stop(timeout=30) -> Dict[str, Any]:
+    """被动等待程序自行停下（崩溃SIGSEGV/断点/信号），不发Ctrl-C，不扰动时序。
+
+    用于发出continue后等待并捕获崩溃/断点命中。轮询直到gdb回到提示符或超时，
+    返回pane尾部现场。timeout默认30秒。
+    """
     try:
-        communicator = init_communicator()
-        if not communicator or not hasattr(communicator, 'check_gdb_blocked'):
-            return {"success": False, "blocked": False, "running_time": 0, "message": "不支持阻塞检测"}
-        
-        status = communicator.check_gdb_blocked()
+        comm = init_communicator()
+        r = comm.wait_stop(timeout)
+        elapsed = r.get("elapsed", 0.0)
+        scene = r.get("scene", "")
+        if r.get("stopped"):
+            msg = f"已停下(耗时{elapsed}s)\n{scene}"
+        else:
+            msg = f"等待超时({elapsed}s)，程序可能仍在运行。\n{scene}"
         return {
-            "success": True,
-            "blocked": status["is_blocked"],
-            "running_time": status["running_time"],
-            "message": status["status"]
+            "success": r.get("success", False),
+            "was_blocked": r.get("was_blocked", False),
+            "stopped": r.get("stopped", False),
+            "elapsed": elapsed,
+            "scene": scene,
+            "formatted_result": msg,
         }
     except Exception as e:
-        logger.error(f"检查阻塞状态出错: {str(e)}")
-        return {"success": False, "blocked": False, "running_time": 0, "message": f"出错: {str(e)}"} 
+        logger.error(f"wait_stop出错: {str(e)}")
+        return {"success": False, "was_blocked": False, "stopped": False, "elapsed": 0.0,
+                "scene": f"出错: {str(e)}", "formatted_result": f"wait_stop出错: {str(e)}"}
+
+
+def gdb_try_interrupt(timeout=10) -> Dict[str, Any]:
+    """主动发Ctrl-C中断正在运行的程序（若已停下则为空操作），并如实返回 was_blocked(调用前是否在跑) 与停止现场。
+
+    兼具"叫停程序"与"如实探测是否在跑"两种用途，替代旧的被动 check_blocked
+    （旧实现读的是可能失真的内部标志）。timeout默认10秒。
+    """
+    try:
+        comm = init_communicator()
+        r = comm.try_interrupt(timeout)
+        elapsed = r.get("elapsed", 0.0)
+        scene = r.get("scene", "")
+        pre = "程序在跑" if r.get("was_blocked") else "程序已停"
+        if r.get("stopped"):
+            msg = f"调用前{pre}；已停下(耗时{elapsed}s)。\n{scene}"
+        else:
+            msg = f"调用前{pre}；未在超时({elapsed}s)内回到提示符。\n{scene}"
+        return {
+            "success": r.get("success", False),
+            "was_blocked": r.get("was_blocked", False),
+            "stopped": r.get("stopped", False),
+            "elapsed": elapsed,
+            "scene": scene,
+            "formatted_result": msg,
+        }
+    except Exception as e:
+        logger.error(f"try_interrupt出错: {str(e)}")
+        return {"success": False, "was_blocked": False, "stopped": False, "elapsed": 0.0,
+                "scene": f"出错: {str(e)}", "formatted_result": f"try_interrupt出错: {str(e)}"} 

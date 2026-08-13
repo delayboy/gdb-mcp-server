@@ -110,6 +110,103 @@ class TmuxCommunicator:
             "status": f"GDB运行中，已运行 {running_time:.1f} 秒",
         }
 
+    # ---- 长跑生命周期：wait_stop(被动等停) / try_interrupt(主动叫停) ----
+    # 这些方法直接读 pane 判断是否回到 (gdb) 提示符，不依赖 is_blocked 标志，
+    # 因此即使 continue 是从外部（如直接 tmux send-keys）发出的，也能如实反映状态。
+
+    def _capture_pane(self, target):
+        """读取整个 tmux pane 的历史缓冲文本"""
+        cmd = ["tmux", "capture-pane", "-p", "-t", target, "-S", "-", "-E", "-"]
+        return subprocess.check_output(cmd, text=True, timeout=3)
+
+    def _at_prompt(self, pane):
+        """判断 gdb 是否已回到 (gdb) 提示符（即程序已停下）"""
+        lines = [ln for ln in pane.splitlines() if ln.strip() != ""]
+        if not lines:
+            return False
+        return re.search(r"\(gdb\)\s*$", lines[-1]) is not None
+
+    def _stop_scene(self, pane, n=80):
+        """返回 pane 尾部 n 行作为停止现场"""
+        return "\n".join(pane.splitlines()[-n:]).strip()
+
+    def wait_stop(self, timeout=30):
+        """被动等待程序自行停下（崩溃/断点/信号），不发 Ctrl-C，不扰动时序。
+
+        返回 dict:
+          - success: 通信是否成功
+          - was_blocked: 调用前程序是否在跑（未在提示符）
+          - stopped: 超时内是否已停下
+          - scene: pane 尾部现场
+          - elapsed: 耗时(秒)
+        """
+        if not self._require_session():
+            return {"success": False, "was_blocked": False, "stopped": False,
+                    "scene": "未找到GDB的tmux会话，请先启动或附加", "elapsed": 0.0}
+        target = self.tmux_session_name
+        start = time.time()
+        try:
+            pane = self._capture_pane(target)
+        except Exception as exc:
+            return {"success": False, "was_blocked": False, "stopped": False,
+                    "scene": f"读取pane失败: {exc}", "elapsed": 0.0}
+        was_blocked = not self._at_prompt(pane)
+        stopped = self._at_prompt(pane)
+        deadline = start + timeout
+        while not stopped and time.time() < deadline:
+            time.sleep(0.5)
+            try:
+                pane = self._capture_pane(target)
+            except Exception:
+                pass
+            stopped = self._at_prompt(pane)
+        if stopped:
+            self.is_blocked = False
+        return {"success": True, "was_blocked": was_blocked, "stopped": stopped,
+                "scene": self._stop_scene(pane), "elapsed": round(time.time() - start, 1)}
+
+    def try_interrupt(self, timeout=10):
+        """主动发 Ctrl-C 叫停程序，并如实报告调用前是否在跑。
+
+        若程序已在提示符（已停下），Ctrl-C 为空操作，was_blocked=False。
+        返回 dict 同 wait_stop。
+        """
+        if not self._require_session():
+            return {"success": False, "was_blocked": False, "stopped": False,
+                    "scene": "未找到GDB的tmux会话，请先启动或附加", "elapsed": 0.0}
+        target = self.tmux_session_name
+        start = time.time()
+        try:
+            pane = self._capture_pane(target)
+        except Exception as exc:
+            return {"success": False, "was_blocked": False, "stopped": False,
+                    "scene": f"读取pane失败: {exc}", "elapsed": 0.0}
+        was_blocked = not self._at_prompt(pane)
+        try:
+            subprocess.check_output(["tmux", "send-keys", "-t", target, "C-c"],
+                                    text=True, timeout=3)
+        except Exception as exc:
+            return {"success": False, "was_blocked": was_blocked, "stopped": False,
+                    "scene": f"发送C-c失败: {exc}", "elapsed": 0.0}
+        stopped = False
+        deadline = start + timeout
+        while time.time() < deadline:
+            time.sleep(0.3)
+            try:
+                pane = self._capture_pane(target)
+            except Exception:
+                pass
+            if self._at_prompt(pane):
+                stopped = True
+                break
+        if stopped:
+            self.is_blocked = False
+        else:
+            self.is_blocked = was_blocked
+            self.last_command_time = start
+        return {"success": True, "was_blocked": was_blocked, "stopped": stopped,
+                "scene": self._stop_scene(pane), "elapsed": round(time.time() - start, 1)}
+
     def _require_session(self):
         if self.tmux_session_name:
             return True
