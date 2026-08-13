@@ -6,14 +6,14 @@ import traceback
 from typing import Dict
 from fastmcp import FastMCP
 import gdb_tools
-
+import os
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger('gdb-mcp-server')
-
-mcp = FastMCP("GDB", log_level="INFO")
+os.environ["FASTMCP_LOG_LEVEL"] = "INFO"
+mcp = FastMCP("GDB")
 
 @mcp.tool(name="sys_find_gdb_processes")
 def sys_find_gdb_processes(random_string="dummy") -> Dict:
