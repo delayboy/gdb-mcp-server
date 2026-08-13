@@ -70,12 +70,19 @@ class GdbCommunicator:
             if self.tmux_comm:
                 logger.info("在Linux上，优先尝试使用tmux查找GDB会话")
                 if self.tmux_comm.find_gdb_window():
+                    self.tmux_comm._init_session()
                     self.preferred_method = "tmux"
                     self.connected = True
                     logger.info(f"使用tmux方式成功找到GDB会话")
                     return True
                 else:
-                    logger.info("未找到tmux GDB会话，将尝试其他方法")
+                    logger.info("未找到已有tmux GDB会话，尝试自动创建")
+                    if self.tmux_comm._create_session():
+                        self.preferred_method = "tmux"
+                        self.connected = True
+                        logger.info("自动创建tmux gdb会话成功")
+                        return True
+                    logger.info("自动创建tmux gdb会话也失败，将尝试其他方法")
             
             # 如果tmux失败，尝试使用pexpect连接
             logger.info("尝试使用pexpect附加到GDB进程")
