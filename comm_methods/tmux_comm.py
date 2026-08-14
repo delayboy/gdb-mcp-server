@@ -9,6 +9,10 @@ from typing import Tuple
 
 logger = logging.getLogger("gdb-mcp-server.tmux_comm")
 
+# 兜底分支（标记丢失时）返回的尾部现场字符上限，避免把整页残留 scrollback
+# 灌进 tool result 触发 LLM token 上限。
+_SALVAGE_MAX_CHARS = 8000
+
 
 class TmuxCommunicator:
     """使用tmux终端与GDB通信的类"""
@@ -353,19 +357,25 @@ class TmuxCommunicator:
                 cleaned = output_value.replace(command, "", 1).strip()
                 return True, cleaned
 
-            # Markers not found — output was too long and scrolled out of tmux buffer
-            # Return what we have from the pane (after command echo) with a hint
+            # Markers not found — output was too long and scrolled out of tmux buffer.
+            # 只回尾部现场，避免把整页残留 scrollback 灌进 tool result 触发 token 上限。
             hint = (f"⚠ 输出文本过长，起始标记已滚出tmux缓冲区导致截断。"
                     f"建议使用 pipe 命令筛选，例如: pipe {command} | grep <关键词>")
             # Try to salvage whatever is between the command and end_marker
             partial = content
             if end_marker in partial:
                 partial = partial.split(end_marker, 1)[0]
-            # Strip the command echo line itself if present
             partial_lines = [l for l in partial.splitlines() if l.strip()]
-            if partial_lines:
-                return True, hint + "\n---\n" + "\n".join(partial_lines)
-            return True, hint
+            if not partial_lines:
+                return True, hint
+
+            # 字符上限：只保留尾部 _SALVAGE_MAX_CHARS 个字符（行数不影响 context，故不限行）
+            body = "\n".join(partial_lines)
+            note = ""
+            if len(body) > _SALVAGE_MAX_CHARS:
+                body = "...(残留历史过长，已截断尾部)...\n" + body[-_SALVAGE_MAX_CHARS:]
+                note = " (内容过长已截断)"
+            return True, hint + note + "\n---\n" + body
 
         except Exception as exc:
             logger.error(f"执行命令失败: {exc}")
