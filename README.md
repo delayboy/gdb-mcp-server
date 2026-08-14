@@ -54,7 +54,7 @@ python3 ~/MCP_server/gdb-mcp-server/mcp_server.py
 - **终端输出隔离**：tmux 侧统一插入唯一的开始/结束标记，自动清理命令和提示符，AI 仅接收结构化结果，不再混入终端错误。
 - **阻塞检测与自动中断**：针对 `continue`、`run`、`target remote` 等命令，提供多次轮询与 `Ctrl-C` 自动中断策略，并返回清晰提示。
 - **Linux 端适配**：新的 tmux 通信链可以遍历所有 session/pane，精确定位真正的 `gdb/pwndbg/gef` 进程并忽略 `gdbserver`，整个控制过程无需切换窗口。
-- **更安全的进程筛选**：`sys_find_gdb_processes` 与 tmux 探测逻辑会过滤 Python 启动脚本及远程 server，只附加到可交互的本地 GDB。
+- **更安全的进程筛选**：`sys_find_or_start_gdb` 与 tmux 探测逻辑会过滤 Python 启动脚本及远程 server，只附加到可交互的本地 GDB；找不到任何 GDB 时会自动启动一个会话。
 - **API 精简**：移除了不再需要的“启动 GDB”接口，保留并强化“查找 → 附加 → 执行”主流程，让 README、工具列表与实现保持一致。
 
 ## 技术实现简介
@@ -99,8 +99,8 @@ GDB MCP 服务器使用以下技术实现 GDB 的控制和通信：
 2. 使用 MCP 协议通过服务器与 GDB 交互。服务器提供以下工具函数：
 
    ### 系统工具
-   - `sys_find_gdb_processes` - 查找所有运行的 GDB 进程
-   - `sys_attach_to_gdb` - 附加到 GDB 进程
+   - `sys_find_or_start_gdb` - 查找运行的 GDB 进程，没有则自动启动一个会话
+   - `sys_attach_or_start_gdb` - 附加到 GDB 会话（不传 PID 时自动查找/启动并附加）
 
    ### GDB 调试工具
    - `gdb_execute_command` - 执行任意 GDB 命令

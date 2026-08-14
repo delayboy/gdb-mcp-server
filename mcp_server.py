@@ -15,15 +15,15 @@ logger = logging.getLogger('gdb-mcp-server')
 os.environ["FASTMCP_LOG_LEVEL"] = "INFO"
 mcp = FastMCP("GDB")
 
-@mcp.tool(name="sys_find_gdb_processes")
-def sys_find_gdb_processes(random_string="dummy") -> Dict:
-    """查找系统中运行的所有GDB进程"""
-    return gdb_tools.sys_find_gdb_processes(random_string)
+@mcp.tool(name="sys_find_or_start_gdb")
+def sys_find_or_start_gdb(random_string="dummy") -> Dict:
+    """查找正在运行的 GDB 进程；若一个都没有，则自动启动一个新的 gdb 会话。返回 gdb_pid（首个有效 PID）与 created 标志。这是建立/获取 gdb 会话的首选入口，找不到就自动拉起。"""
+    return gdb_tools.sys_find_or_start_gdb(random_string)
 
-@mcp.tool(name="sys_attach_to_gdb")
-def sys_attach_to_gdb(gdb_pid=None, tty_device=None) -> Dict:
-    """附加到现有的GDB进程"""
-    return gdb_tools.sys_attach_to_gdb(gdb_pid, tty_device)
+@mcp.tool(name="sys_attach_or_start_gdb")
+def sys_attach_or_start_gdb(gdb_pid=None, tty_device=None) -> Dict:
+    """附加到一个 GDB 会话以绑定调试通道（附加后即可用 gdb_* 命令）。不传 gdb_pid 时自动查找或启动一个 gdb 会话并附加。调试前调用此函数完成连接。"""
+    return gdb_tools.sys_attach_or_start_gdb(gdb_pid, tty_device)
 
 
 @mcp.tool(name="gdb_execute_command")
