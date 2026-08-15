@@ -170,7 +170,7 @@ class GdbCommunicator:
         
         # 所有方法都失败了
         logger.error("所有通信方法都失败，无法执行命令")
-        return False, "无法与GDB进程通信，所有方法都失败"
+        return False, "无法与GDB进程通信，所有方法都失败，程序可能正在运行，请尝试interrupt叫停来恢复访问"
     
     def check_gdb_blocked(self) -> Dict[str, Any]:
         """检查GDB是否处于阻塞状态
